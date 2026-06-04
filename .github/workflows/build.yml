@@ -1,11 +1,9 @@
-name: Buildroot CI - Anbernic RG35XX H (Full OS: Wireless + Inputs + Virtual Kbd)
-
 on:
   push:
     branches: [ "main", "master", "principal" ]
   pull_request:
     branches: [ "main", "master", "principal" ]
-  workflow_dispatch: # Permite disparar a compilação manualmente se necessário
+  workflow_dispatch:
 
 jobs:
   build-linux:
@@ -19,7 +17,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
-          build-essential libncurses5-dev libssl-dev build-essential \
+          build-essential libncurses5-dev libssl-dev \
           sed make binutils g++ bash patch gzip bzip2 perl tar cpio \
           unzip rsync file bc wget qtbase5-dev qtgstreamer-plugins-qt5 \
           python3 python3-flake8 flake8 python3-setuptools git
@@ -30,13 +28,12 @@ jobs:
         path: |
           buildroot/dl
           buildroot/output/ccache
-        key: buildroot-cache-full-${{ runner.os }}-${{ github.sha }}
+        key: br-cache-${{ runner.os }}-${{ github.sha }}
         restore-keys: |
-          buildroot-cache-full-${{ runner.os }}-
+          br-cache-${{ runner.os }}-
 
     - name: Download Buildroot
       run: |
-        # Utilizando a versão LTS estável do Buildroot
         git clone --depth 1 --branch 2024.02.x https://github.com/buildroot/buildroot.git
 
     - name: Configure Buildroot for Anbernic RG35XX H
@@ -44,29 +41,20 @@ jobs:
         cd buildroot
         
         cat <<EOF > configs/anbernic_rg35xx_h_defconfig
-        # Arquitetura Básica (Allwinner H700)
         BR2_aarch64=y
         BR2_cortex_a53=y
         BR2_ARM_FPU_VFPV4=y
-        
-        # Toolchain com suporte a Threads, C++ e Dynamic Loading (Obrigatório para BlueZ)
         BR2_TOOLCHAIN_BUILDROOT_WCHAR=y
         BR2_TOOLCHAIN_BUILDROOT_CXX=y
         BR2_TOOLCHAIN_HAS_THREADS=y
         BR2_TOOLCHAIN_HAS_THREADS_NPTL=y
-        
-        # Sistema de Arquivos e Imagem Final para o Cartão SD
         BR2_TARGET_ROOTFS_EXT2=y
         BR2_TARGET_ROOTFS_EXT2_4=y
         BR2_PACKAGE_HOST_GENIMAGE=y
         BR2_PACKAGE_HOST_DOSFSTOOLS=y
         BR2_PACKAGE_HOST_MTOOLS=y
-        
-        # Otimização de Build (Cache para acelerar compilações futuras no CI)
         BR2_CCACHE=y
         BR2_CCACHE_DIR="\$(O)/ccache"
-        
-        # Kernel Linux (Repositório mainline adaptado para o ecossistema RG35XX)
         BR2_LINUX_KERNEL=y
         BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
         BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="https://github.com/rg35xx-cfw/linux/archive/refs/heads/rg35xx-h-mainline.tar.gz"
@@ -74,55 +62,43 @@ jobs:
         BR2_LINUX_KERNEL_DTS_SUPPORT=y
         BR2_LINUX_KERNEL_INTREE_DTS_NAME="allwinner/sun50i-h700-anbernic-rg35xx-h"
         BR2_LINUX_KERNEL_INSTALL_TARGET=y
-        
-        # REDE: WI-FI E BLUETOOTH
         BR2_PACKAGE_LINUX_FIRMWARE=y
-        BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX=y # Firmware Realtek
-        BR2_PACKAGE_RTL8821CS=y                 # Driver out-of-tree para o chip Wi-Fi/BT do portátil
-        BR2_PACKAGE_鐵W=y                       # Substituído internamente por BR2_PACKAGE_IW
-        BR2_PACKAGE_IW=y                        # Ferramenta CLI para varredura de redes wireless
-        BR2_PACKAGE_WPA_SUPPLICANT=y            # Autenticação de redes WPA2/WPA3
+        BR2_PACKAGE_LINUX_FIRMWARE_RTL_88XX=y
+        BR2_PACKAGE_RTL8821CS=y
+        BR2_PACKAGE_IW=y
+        BR2_PACKAGE_WPA_SUPPLICANT=y
         BR2_PACKAGE_WPA_SUPPLICANT_NL80211=y
         BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
         BR2_PACKAGE_WIRELESS_TOOLS=y
-        BR2_PACKAGE_BLUEZ5_UTILS=y              # Pilha oficial do Bluetooth Linux
-        BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y       # Instala o bluetoothctl no sistema
-
-        # UTILITÁRIOS DE CONTROLE NATIVO E INPUT (SUBSISTEMA EVDEV)
-        BR2_PACKAGE_EVTEST=y                    # Ferramenta para monitorar e testar botões no terminal
-        BR2_PACKAGE_LIBEVDEV=y                  # Biblioteca para desenvolvimento de software de controle
-        BR2_PACKAGE_INPUT_TOOLS=y                # Utilitários de joystick (jstest/jscal)
-        BR2_PACKAGE_TRIGGERHAPPY=y              # Daemon leve para mapear botões físicos para comandos
-
-        # SUPORTE A EMULAÇÃO DE TECLADO VIRTUAL POR SOFTWARE
+        BR2_PACKAGE_BLUEZ5_UTILS=y
+        BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
+        BR2_PACKAGE_EVTEST=y
+        BR2_PACKAGE_LIBEVDEV=y
+        BR2_PACKAGE_INPUT_TOOLS=y
+        BR2_PACKAGE_TRIGGERHAPPY=y
         BR2_PACKAGE_XKEYBOARD_CONFIG=y
         EOF
         
-        # Corrige possíveis artefatos de digitação e aplica a defconfig
-        sed -i '/BR2_PACKAGE_鐵W=y/d' configs/anbernic_rg35xx_h_defconfig
         make anbernic_rg35xx_h_defconfig
 
-    - name: Script de Customização (Estruturação do Sistema e Arquivos de Configuração)
+    - name: Script de Customizacao
       run: |
         mkdir -p buildroot/board/anbernic/rg35xx_h/rootfs_overlay/etc/wpa_supplicant
         mkdir -p buildroot/board/anbernic/rg35xx_h/rootfs_overlay/etc/init.d
         mkdir -p buildroot/board/anbernic/rg35xx_h/rootfs_overlay/etc/triggerhappy/triggers.d
         mkdir -p buildroot/board/anbernic/rg35xx_h/rootfs_overlay/usr/bin
         
-        # 1. Esqueleto para configuração do Wi-Fi
         cat <<EOF > buildroot/board/anbernic/rg35xx_h/rootfs_overlay/etc/wpa_supplicant/wpa_supplicant.conf
         ctrl_interface=/var/run/wpa_supplicant
         update_config=1
         country=BR
         EOF
 
-        # 2. Script de Inicialização e Vinculação UART do chip de Bluetooth
         cat <<EOF > buildroot/board/anbernic/rg35xx_h/rootfs_overlay/etc/init.d/S40bluetooth
         #!/bin/sh
         case "\$1" in
           start)
                 printf "Iniciando Bluetooth... "
-                # Faz o link serial com a controladora Realtek conectada na UART interna ttyS1
                 hciattach /dev/ttyS1 any 115200 flow
                 hciconfig hci0 up
                 /usr/libexec/bluetooth/bluetoothd -n &
@@ -140,29 +116,22 @@ jobs:
         EOF
         chmod +x buildroot/board/anbernic/rg35xx_h/rootfs_overlay/etc/init.d/S40bluetooth
 
-        # 3. Mapeamento de Atalhos com os botões físicos via Triggerhappy
         cat <<EOF > buildroot/board/anbernic/rg35xx_h/rootfs_overlay/etc/triggerhappy/triggers.d/buttons.conf
-        # Mapeamento de Eventos capturados do barramento interno do RG35XX H
         KEY_VOLUMEUP     1    /usr/bin/amixer set Master 5%+
         KEY_VOLUMEDOWN   1    /usr/bin/amixer set Master 5%-
-        KEY_HOMEPAGE     1    /usr/bin/virtual_keyboard_toggle.sh # Botão de Função/Menu alternando o teclado virtual
+        KEY_HOMEPAGE     1    /usr/bin/virtual_keyboard_toggle.sh
         EOF
 
-        # 4. Script Gancho para Gerenciamento do Teclado Virtual via Software
         cat <<EOF > buildroot/board/anbernic/rg35xx_h/rootfs_overlay/usr/bin/virtual_keyboard_toggle.sh
         #!/bin/sh
-        # Ativa/Desativa o interpretador de mapeamento baseado em /dev/uinput
         if pgrep -x "uinput" > /dev/null; then
-            echo "Encerrando instância do teclado virtual..."
             killall virtual_keyboard_program 2>/dev/null
         else
-            echo "Iniciando captura dos botões físicos para emulação de teclado..."
-            # Aqui você pode chamar seu script em python-evdev ou binário compilado
+            echo "Teclado virtual ativo"
         fi
         EOF
         chmod +x buildroot/board/anbernic/rg35xx_h/rootfs_overlay/usr/bin/virtual_keyboard_toggle.sh
 
-        # 5. Configuração do Genimage para geração do leiaute do Cartão SD (Bootloader Allwinner alinhado a 8K)
         cat <<EOF > buildroot/board/anbernic/rg35xx_h/genimage.cfg
         image boot.vfat {
           vfat { files = { "Image", "sun50i-h700-anbernic-rg35xx-h.dtb" } }
@@ -176,7 +145,6 @@ jobs:
         }
         EOF
         
-        # Script executado pelo Buildroot no fim da compilação para criar o arquivo final .img
         cat <<EOF > buildroot/board/anbernic/rg35xx_h/post-image.sh
         #!/bin/sh
         BOARD_DIR="\$(dirname \$0)"
@@ -187,7 +155,6 @@ jobs:
         EOF
         chmod +x buildroot/board/anbernic/rg35xx_h/post-image.sh
         
-        # Injeta o overlay e o pós-processamento de imagem nas variáveis globais do arquivo .config do Buildroot
         echo 'BR2_ROOTFS_POST_IMAGE_SCRIPT="board/anbernic/rg35xx_h/post-image.sh"' >> buildroot/.config
         echo 'BR2_ROOTFS_OVERLAY="board/anbernic/rg35xx_h/rootfs_overlay"' >> buildroot/.config
         cd buildroot && make olddefconfig
@@ -195,7 +162,6 @@ jobs:
     - name: Compile OS (Buildroot Make)
       run: |
         cd buildroot
-        # Roda o make gerenciando os cores paralelos do runner do GitHub Actions
         make -j$(nproc)
 
     - name: Save Buildroot Cache
@@ -205,7 +171,7 @@ jobs:
         path: |
           buildroot/dl
           buildroot/output/ccache
-        key: buildroot-cache-full-${{ runner.os }}-${{ github.sha }}
+        key: br-cache-${{ runner.os }}-${{ github.sha }}
 
     - name: Upload SD Card Image Artifact
       uses: actions/upload-artifact@v4
